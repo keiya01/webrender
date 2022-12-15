@@ -16,7 +16,7 @@ use crate::device::{
 };
 use crate::frame_builder::FrameBuilderConfig;
 use crate::glyph_cache::GlyphCache;
-use crate::glyph_rasterizer::{GlyphRasterizer, SharedFontResources};
+use glyph_rasterizer::{GlyphRasterizer, SharedFontResources};
 use crate::gpu_types::PrimitiveInstanceData;
 use crate::internal_types::{FastHashMap, FastHashSet, FrameId};
 use crate::picture;

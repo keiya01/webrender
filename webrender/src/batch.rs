@@ -7,7 +7,7 @@ use api::{FontInstanceFlags, YuvColorSpace, YuvFormat, ColorDepth, ColorRange, P
 use api::units::*;
 use crate::clip::{ClipNodeFlags, ClipNodeRange, ClipItemKind, ClipStore};
 use crate::spatial_tree::{SpatialTree, SpatialNodeIndex, CoordinateSystemId};
-use crate::glyph_rasterizer::{GlyphFormat, SubpixelDirection};
+use glyph_rasterizer::{GlyphFormat, SubpixelDirection};
 use crate::gpu_cache::{GpuBlockData, GpuCache, GpuCacheAddress};
 use crate::gpu_types::{BrushFlags, BrushInstance, PrimitiveHeaders, ZBufferId, ZBufferIdGenerator};
 use crate::gpu_types::{SplitCompositeInstance};
@@ -110,13 +110,11 @@ impl TextureSet {
     }
 }
 
-impl TextureSource {
-    fn combine(&self, other: TextureSource) -> TextureSource {
-        if other == TextureSource::Invalid {
-            *self
-        } else {
-            other
-        }
+fn combine_texture_source(one: &TextureSource, other: TextureSource) -> TextureSource {
+    if other == TextureSource::Invalid {
+        *one
+    } else {
+        other
     }
 }
 
@@ -205,20 +203,20 @@ impl BatchTextures {
 
         let mut new_textures = BatchTextures::empty();
 
-        new_textures.clip_mask = self.clip_mask.combine(other.clip_mask);
+        new_textures.clip_mask = combine_texture_source(&self.clip_mask, other.clip_mask);
 
         for i in 0 .. 3 {
-            new_textures.input.colors[i] = self.input.colors[i].combine(other.input.colors[i]);
+            new_textures.input.colors[i] = combine_texture_source(&self.input.colors[i], other.input.colors[i]);
         }
 
         Some(new_textures)
     }
 
     fn merge(&mut self, other: &BatchTextures) {
-        self.clip_mask = self.clip_mask.combine(other.clip_mask);
+        self.clip_mask = combine_texture_source(&self.clip_mask, other.clip_mask);
 
         for (s, o) in self.input.colors.iter_mut().zip(other.input.colors.iter()) {
-            *s = s.combine(*o);
+            *s = combine_texture_source(&s, *o);
         }
     }
 }

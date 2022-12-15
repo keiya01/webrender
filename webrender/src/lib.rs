@@ -97,7 +97,6 @@ mod freelist;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod gamma_lut;
 mod glyph_cache;
-mod glyph_rasterizer;
 mod gpu_cache;
 mod gpu_types;
 mod hit_test;
@@ -140,28 +139,6 @@ pub mod render_api;
 
 pub mod shader_source {
     include!(concat!(env!("OUT_DIR"), "/shaders.rs"));
-}
-
-mod platform {
-    #[cfg(target_os = "macos")]
-    pub use crate::platform::macos::font;
-    #[cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))]
-    pub use crate::platform::unix::font;
-    #[cfg(target_os = "windows")]
-    pub use crate::platform::windows::font;
-
-    #[cfg(target_os = "macos")]
-    pub mod macos {
-        pub mod font;
-    }
-    #[cfg(any(target_os = "android", all(unix, not(target_os = "macos"))))]
-    pub mod unix {
-        pub mod font;
-    }
-    #[cfg(target_os = "windows")]
-    pub mod windows {
-        pub mod font;
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -227,6 +204,7 @@ pub use crate::picture::{TileNode, TileNodeKind, TileOffset};
 pub use crate::intern::ItemUid;
 pub use crate::render_api::*;
 pub use crate::tile_cache::{PictureCacheDebugInfo, DirtyTileDebugInfo, TileDebugInfo, SliceDebugInfo};
+pub use glyph_rasterizer;
 
 #[cfg(feature = "sw_compositor")]
 pub use crate::compositor::sw_compositor;

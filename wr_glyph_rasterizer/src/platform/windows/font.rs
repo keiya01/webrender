@@ -6,10 +6,10 @@ use api::{FontInstanceFlags, FontKey, FontRenderMode, FontVariation};
 use api::{ColorU, GlyphDimensions, NativeFontHandle};
 use dwrote;
 use crate::gamma_lut::{ColorLut, GammaLut};
-use crate::glyph_rasterizer::{FontInstance, FontTransform, GlyphKey};
-use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterError, GlyphRasterResult, RasterizedGlyph};
-use crate::glyph_rasterizer::apply_multistrike_bold;
-use crate::internal_types::{FastHashMap, FastHashSet, ResourceCacheError};
+use crate::rasterizer::{FontInstance, FontTransform, GlyphKey};
+use crate::rasterizer::{GlyphFormat, GlyphRasterError, GlyphRasterResult, RasterizedGlyph};
+use crate::rasterizer::apply_multistrike_bold;
+use crate::types::{FastHashMap, FastHashSet, ResourceCacheError};
 use std::borrow::Borrow;
 use std::collections::hash_map::Entry;
 use std::hash::{Hash, Hasher};
@@ -74,7 +74,10 @@ struct FontFace {
 
 pub struct FontContext {
     fonts: FastHashMap<FontKey, FontFace>,
-    variations: FastHashMap<(FontKey, dwrote::DWRITE_FONT_SIMULATIONS, Vec<FontVariation>), dwrote::FontFace>,
+    variations: FastHashMap<
+        (FontKey, dwrote::DWRITE_FONT_SIMULATIONS, Vec<FontVariation>),
+        dwrote::FontFace,
+    >,
     gamma_luts: FastHashMap<(u16, u8), GammaLut>,
 }
 
@@ -85,22 +88,20 @@ unsafe impl Send for FontContext {}
 fn dwrite_texture_type(render_mode: FontRenderMode) -> dwrote::DWRITE_TEXTURE_TYPE {
     match render_mode {
         FontRenderMode::Mono => dwrote::DWRITE_TEXTURE_ALIASED_1x1,
-        FontRenderMode::Alpha |
-        FontRenderMode::Subpixel => dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1,
+        FontRenderMode::Alpha | FontRenderMode::Subpixel => dwrote::DWRITE_TEXTURE_CLEARTYPE_3x1,
     }
 }
 
-fn dwrite_measure_mode(
-    font: &FontInstance,
-    bitmaps: bool,
-) -> dwrote::DWRITE_MEASURING_MODE {
+fn dwrite_measure_mode(font: &FontInstance, bitmaps: bool) -> dwrote::DWRITE_MEASURING_MODE {
     if bitmaps || font.flags.contains(FontInstanceFlags::FORCE_GDI) {
         dwrote::DWRITE_MEASURING_MODE_GDI_CLASSIC
     } else {
-      match font.render_mode {
-          FontRenderMode::Mono => dwrote::DWRITE_MEASURING_MODE_GDI_CLASSIC,
-          FontRenderMode::Alpha | FontRenderMode::Subpixel => dwrote::DWRITE_MEASURING_MODE_NATURAL,
-      }
+        match font.render_mode {
+            FontRenderMode::Mono => dwrote::DWRITE_MEASURING_MODE_GDI_CLASSIC,
+            FontRenderMode::Alpha | FontRenderMode::Subpixel => {
+                dwrote::DWRITE_MEASURING_MODE_NATURAL
+            }
+        }
     }
 }
 
@@ -137,8 +138,8 @@ fn dwrite_render_mode(
 fn is_bitmap_font(font: &FontInstance) -> bool {
     // If bitmaps are requested, then treat as a bitmap font to disable transforms.
     // If mono AA is requested, let that take priority over using bitmaps.
-    font.render_mode != FontRenderMode::Mono &&
-        font.flags.contains(FontInstanceFlags::EMBEDDED_BITMAPS)
+    font.render_mode != FontRenderMode::Mono
+        && font.flags.contains(FontInstanceFlags::EMBEDDED_BITMAPS)
 }
 
 impl FontContext {
@@ -160,7 +161,15 @@ impl FontContext {
             let face = font.create_font_face();
             let file = face.get_files().pop().unwrap();
             let index = face.get_index();
-            self.fonts.insert(*font_key, FontFace { cached: None, file, index, face });
+            self.fonts.insert(
+                *font_key,
+                FontFace {
+                    cached: None,
+                    file,
+                    index,
+                    face,
+                },
+            );
         }
     }
 
@@ -171,7 +180,15 @@ impl FontContext {
 
         if let Some(file) = dwrote::FontFile::new_from_data(data) {
             if let Ok(face) = file.create_face(index, dwrote::DWRITE_FONT_SIMULATIONS_NONE) {
-                self.fonts.insert(*font_key, FontFace { cached: None, file, index, face });
+                self.fonts.insert(
+                    *font_key,
+                    FontFace {
+                        cached: None,
+                        file,
+                        index,
+                        face,
+                    },
+                );
                 return;
             }
         }
@@ -189,10 +206,18 @@ impl FontContext {
         let mut cache = FONT_CACHE.lock().unwrap();
         // Check to see if the font is already in the cache. If so, reuse it.
         if let Some(font) = cache.get(font_handle.path.as_path()) {
-            if let Ok(face) = font.file.create_face(index, dwrote::DWRITE_FONT_SIMULATIONS_NONE) {
+            if let Ok(face) = font
+                .file
+                .create_face(index, dwrote::DWRITE_FONT_SIMULATIONS_NONE)
+            {
                 self.fonts.insert(
                     *font_key,
-                    FontFace { cached: Some(font.key.clone()), file: font.file.clone(), index, face },
+                    FontFace {
+                        cached: Some(font.key.clone()),
+                        file: font.file.clone(),
+                        index,
+                        face,
+                    },
                 );
                 return;
             }
@@ -203,7 +228,12 @@ impl FontContext {
                 let key: CachedFontKey = font_handle.path.into();
                 self.fonts.insert(
                     *font_key,
-                    FontFace { cached: Some(key.clone()), file: file.clone(), index, face },
+                    FontFace {
+                        cached: Some(key.clone()),
+                        file: file.clone(),
+                        index,
+                        face,
+                    },
                 );
                 cache.insert(CachedFont { key, file });
                 return;
@@ -238,7 +268,8 @@ impl FontContext {
             } else {
                 dwrote::DWRITE_FONT_SIMULATIONS_NONE
             };
-            self.variations.remove(&(instance.font_key, sims, instance.variations.clone()));
+            self.variations
+                .remove(&(instance.font_key, sims, instance.variations.clone()));
         }
     }
 
@@ -259,12 +290,8 @@ impl FontContext {
         }
     }
 
-    fn get_font_face(
-        &mut self,
-        font: &FontInstance,
-    ) -> &dwrote::FontFace {
-        if !font.flags.contains(FontInstanceFlags::SYNTHETIC_BOLD) &&
-           font.variations.is_empty() {
+    fn get_font_face(&mut self, font: &FontInstance) -> &dwrote::FontFace {
+        if !font.flags.contains(FontInstanceFlags::SYNTHETIC_BOLD) && font.variations.is_empty() {
             return &self.fonts.get(&font.font_key).unwrap().face;
         }
         let sims = if font.flags.contains(FontInstanceFlags::SYNTHETIC_BOLD) {
@@ -272,25 +299,33 @@ impl FontContext {
         } else {
             dwrote::DWRITE_FONT_SIMULATIONS_NONE
         };
-        match self.variations.entry((font.font_key, sims, font.variations.clone())) {
+        match self
+            .variations
+            .entry((font.font_key, sims, font.variations.clone()))
+        {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
                 let normal_face = self.fonts.get(&font.font_key).unwrap();
                 if !font.variations.is_empty() {
                     if let Some(var_face) = normal_face.face.create_font_face_with_variations(
                         sims,
-                        &font.variations.iter().map(|var| {
-                            dwrote::DWRITE_FONT_AXIS_VALUE {
-                                // OpenType tags are big-endian, but DWrite wants little-endian.
-                                axisTag: var.tag.swap_bytes(),
-                                value: var.value,
-                            }
-                        }).collect::<Vec<_>>(),
+                        &font
+                            .variations
+                            .iter()
+                            .map(|var| {
+                                dwrote::DWRITE_FONT_AXIS_VALUE {
+                                    // OpenType tags are big-endian, but DWrite wants little-endian.
+                                    axisTag: var.tag.swap_bytes(),
+                                    value: var.value,
+                                }
+                            })
+                            .collect::<Vec<_>>(),
                     ) {
                         return entry.insert(var_face);
                     }
                 }
-                let var_face = normal_face.file
+                let var_face = normal_face
+                    .file
                     .create_face(normal_face.index, sims)
                     .unwrap_or_else(|_| normal_face.face.clone());
                 entry.insert(var_face)
@@ -305,7 +340,14 @@ impl FontContext {
         size: f32,
         transform: Option<dwrote::DWRITE_MATRIX>,
         bitmaps: bool,
-    ) -> Result<(dwrote::GlyphRunAnalysis, dwrote::DWRITE_TEXTURE_TYPE, dwrote::RECT), dwrote::HRESULT> {
+    ) -> Result<
+        (
+            dwrote::GlyphRunAnalysis,
+            dwrote::DWRITE_TEXTURE_TYPE,
+            dwrote::RECT,
+        ),
+        dwrote::HRESULT,
+    > {
         let face = self.get_font_face(font);
         let glyph = key.index() as u16;
         let advance = 0.0f32;
@@ -326,13 +368,7 @@ impl FontContext {
         };
 
         let dwrite_measure_mode = dwrite_measure_mode(font, bitmaps);
-        let dwrite_render_mode = dwrite_render_mode(
-            face,
-            font,
-            size,
-            dwrite_measure_mode,
-            bitmaps,
-        );
+        let dwrite_render_mode = dwrite_render_mode(face, font, size, dwrite_measure_mode, bitmaps);
 
         let analysis = dwrote::GlyphRunAnalysis::create(
             &glyph_run,
@@ -347,8 +383,9 @@ impl FontContext {
         let bounds = analysis.get_alpha_texture_bounds(texture_type)?;
         // If the bounds are empty, then we might not be able to render the glyph with cleartype.
         // Try again with aliased rendering to check if that works instead.
-        if font.render_mode != FontRenderMode::Mono &&
-           (bounds.left == bounds.right || bounds.top == bounds.bottom) {
+        if font.render_mode != FontRenderMode::Mono
+            && (bounds.left == bounds.right || bounds.top == bounds.bottom)
+        {
             let analysis2 = dwrote::GlyphRunAnalysis::create(
                 &glyph_run,
                 1.0,
@@ -378,7 +415,9 @@ impl FontContext {
         key: &GlyphKey,
     ) -> Option<GlyphDimensions> {
         let (size, x_scale, y_scale, bitmaps, transform) = Self::get_glyph_parameters(font, key);
-        let (_, _, bounds) = self.create_glyph_analysis(font, key, size, transform, bitmaps).ok()?;
+        let (_, _, bounds) = self
+            .create_glyph_analysis(font, key, size, transform, bitmaps)
+            .ok()?;
 
         let width = (bounds.right - bounds.left) as i32;
         let height = (bounds.bottom - bounds.top) as i32;
@@ -394,7 +433,8 @@ impl FontContext {
         } else {
             (x_scale, y_scale / x_scale)
         };
-        let extra_strikes = font.get_extra_strikes(FontInstanceFlags::MULTISTRIKE_BOLD, strike_scale);
+        let extra_strikes =
+            font.get_extra_strikes(FontInstanceFlags::MULTISTRIKE_BOLD, strike_scale);
         let extra_width = extra_strikes as f64 * pixel_step;
 
         let face = self.get_font_face(font);
@@ -402,7 +442,8 @@ impl FontContext {
             .first()
             .map(|metrics| {
                 let em_size = size / 16.;
-                let design_units_per_pixel = face.metrics().metrics0().designUnitsPerEm as f32 / 16. as f32;
+                let design_units_per_pixel =
+                    face.metrics().metrics0().designUnitsPerEm as f32 / 16. as f32;
                 let scaled_design_units_to_pixels = em_size / design_units_per_pixel;
                 let advance = metrics.advanceWidth as f32 * scaled_design_units_to_pixels;
 
@@ -508,15 +549,20 @@ impl FontContext {
         }
     }
 
-    fn get_glyph_parameters(font: &FontInstance, key: &GlyphKey)
-                            -> (f32, f64, f64, bool, Option<dwrote::DWRITE_MATRIX>) {
+    fn get_glyph_parameters(
+        font: &FontInstance,
+        key: &GlyphKey,
+    ) -> (f32, f64, f64, bool, Option<dwrote::DWRITE_MATRIX>) {
         let (x_scale, y_scale) = font.transform.compute_scale().unwrap_or((1.0, 1.0));
         let scaled_size = font.size.to_f64_px() * y_scale;
         let bitmaps = is_bitmap_font(font);
         let (mut shape, (mut x_offset, mut y_offset)) = if bitmaps {
             (FontTransform::identity(), (0.0, 0.0))
         } else {
-            (font.transform.invert_scale(y_scale, y_scale), font.get_subpx_offset(key))
+            (
+                font.transform.invert_scale(y_scale, y_scale),
+                font.get_subpx_offset(key),
+            )
         };
         if font.flags.contains(FontInstanceFlags::FLIP_X) {
             shape = shape.flip_x();
@@ -551,16 +597,15 @@ impl FontContext {
         (scaled_size as f32, x_scale, y_scale, bitmaps, transform)
     }
 
-    pub fn begin_rasterize(_font: &FontInstance) {
-    }
+    pub fn begin_rasterize(_font: &FontInstance) {}
 
-    pub fn end_rasterize(_font: &FontInstance) {
-    }
+    pub fn end_rasterize(_font: &FontInstance) {}
 
     pub fn rasterize_glyph(&mut self, font: &FontInstance, key: &GlyphKey) -> GlyphRasterResult {
         let (size, x_scale, y_scale, bitmaps, transform) = Self::get_glyph_parameters(font, key);
-        let (analysis, texture_type, bounds) = self.create_glyph_analysis(font, key, size, transform, bitmaps)
-                                                   .or(Err(GlyphRasterError::LoadFailed))?;
+        let (analysis, texture_type, bounds) = self
+            .create_glyph_analysis(font, key, size, transform, bitmaps)
+            .or(Err(GlyphRasterError::LoadFailed))?;
         let mut width = (bounds.right - bounds.left) as i32;
         let height = (bounds.bottom - bounds.top) as i32;
         // Alpha texture bounds can sometimes return an empty rect
@@ -569,7 +614,9 @@ impl FontContext {
             return Err(GlyphRasterError::LoadFailed);
         }
 
-        let pixels = analysis.create_alpha_texture(texture_type, bounds).or(Err(GlyphRasterError::LoadFailed))?;
+        let pixels = analysis
+            .create_alpha_texture(texture_type, bounds)
+            .or(Err(GlyphRasterError::LoadFailed))?;
         let padding = if font.use_texture_padding() { 1 } else { 0 };
         let (mut bgra_pixels, is_subpixel) = self.convert_to_bgra(
             &pixels,
@@ -588,7 +635,8 @@ impl FontContext {
         } else {
             (x_scale, y_scale / x_scale)
         };
-        let extra_strikes = font.get_extra_strikes(FontInstanceFlags::MULTISTRIKE_BOLD, strike_scale);
+        let extra_strikes =
+            font.get_extra_strikes(FontInstanceFlags::MULTISTRIKE_BOLD, strike_scale);
         if extra_strikes > 0 {
             let (bold_pixels, bold_width) = apply_multistrike_bold(
                 &bgra_pixels,
@@ -602,16 +650,19 @@ impl FontContext {
             bgra_pixels = bold_pixels;
         }
 
-        let FontInstancePlatformOptions { gamma, contrast, cleartype_level, .. } =
-            font.platform_options.unwrap_or_default();
-        let gamma_lut = self.gamma_luts
-            .entry((gamma, contrast))
-            .or_insert_with(||
-                GammaLut::new(
-                    contrast as f32 / 100.0,
-                    gamma as f32 / 100.0,
-                    gamma as f32 / 100.0,
-                ));
+        let FontInstancePlatformOptions {
+            gamma,
+            contrast,
+            cleartype_level,
+            ..
+        } = font.platform_options.unwrap_or_default();
+        let gamma_lut = self.gamma_luts.entry((gamma, contrast)).or_insert_with(|| {
+            GammaLut::new(
+                contrast as f32 / 100.0,
+                gamma as f32 / 100.0,
+                gamma as f32 / 100.0,
+            )
+        });
         if is_subpixel {
             gamma_lut.preblend_scaled(&mut bgra_pixels, font.color, cleartype_level);
         } else {
